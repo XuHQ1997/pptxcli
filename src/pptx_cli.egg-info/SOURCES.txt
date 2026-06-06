@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+src/pptx_cli/__init__.py
+src/pptx_cli/__main__.py
+src/pptx_cli/cli.py
+src/pptx_cli.egg-info/PKG-INFO
+src/pptx_cli.egg-info/SOURCES.txt
+src/pptx_cli.egg-info/dependency_links.txt
+src/pptx_cli.egg-info/entry_points.txt
+src/pptx_cli.egg-info/top_level.txt
+tests/test_cli.py
