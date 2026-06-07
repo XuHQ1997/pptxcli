@@ -5,6 +5,9 @@ Summary: Agent-friendly CLI for PPT template extraction, filling, and preview
 Author: XuHQ1997
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
+Requires-Dist: pillow>=12.2.0
+Requires-Dist: pypdfium2>=5.9.0
+Requires-Dist: python-pptx>=1.0.2
 
 # pptx_cli
 

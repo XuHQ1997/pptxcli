@@ -4,12 +4,15 @@
 
 ## 当前状态
 
-当前完成了任务 001 的初始化交付：
+当前已完成任务 001，并补上了任务 003 的首版能力：
 
 - 建立了可运行的 CLI 骨架
 - 明确了首版技术选型与目录结构
 - 提供了一个最小 demo 命令
 - 补充了 PPT 解析、写入、预览的技术路线说明
+- 支持为指定 slide 生成候选对象 JSON
+- 支持通过 LibreOffice 渲染高还原度预览图
+- 支持输出目标检测风格的标注框预览图
 
 ## 技术选型
 
@@ -37,10 +40,14 @@
 │   └── pptx_cli/
 │       ├── __init__.py
 │       ├── __main__.py
-│       └── cli.py
+│       ├── cli.py
+│       ├── inspect.py
+│       ├── models.py
+│       └── show.py
 ├── tasks/
 └── tests/
-    └── test_cli.py
+    ├── test_cli.py
+    └── test_show.py
 ```
 
 ## 快速开始
@@ -73,6 +80,22 @@ uv run pptxcli demo form
 - `pptxcli version`：查看版本
 - `pptxcli demo form`：输出最小表单 JSON 示例
 - `pptxcli tech`：输出技术路线摘要
+- `pptxcli show --input ./demo.pptx --slide 0`：渲染指定页预览图
+- `pptxcli show --input ./demo.pptx --slide 0 --annotate`：输出带编号框的标注图
+
+## 任务 003 示例
+
+```bash
+pptxcli show --input ./demo.pptx --slide 0 --annotate
+```
+
+该命令会：
+
+- 使用 `python-pptx` 提取指定页中的 text/image 候选对象
+- 使用 LibreOffice headless 将 PPT 转成高还原度 PDF 预览
+- 将对应页渲染为 PNG
+- 在 PNG 上叠加类似目标检测任务的醒目标注框，并在框内左上角绘制编号块
+- 向标准输出打印候选对象 JSON 和输出图片路径
 
 ## 后续任务映射
 

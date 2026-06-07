@@ -22,6 +22,11 @@ class CliSmokeTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("pptxcli", result.stdout)
 
+    def test_show_help_runs(self) -> None:
+        result = run_cli("show", "--help")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--annotate", result.stdout)
+
     def test_demo_form_outputs_json(self) -> None:
         result = run_cli("demo", "form")
         self.assertEqual(result.returncode, 0)
