@@ -1,4 +1,4 @@
-# 任务 007：Agent 交互协议与稳健性
+# 任务 008：Agent 交互协议与稳健性
 
 ## 目标
 
@@ -6,10 +6,11 @@
 
 ## 主要工作
 
-- 统一 inspect / decision / manifest / form 的 JSON 协议
+- 统一 init / inspect / decision / manifest / form / finish 的 JSON 协议
 - 约定错误码与失败提示
 - 设计字段命名规范与默认规则
 - 梳理典型 Agent 工作流示例
+- 明确单会话模式下的状态边界与失败恢复策略
 
 ## 交付物
 

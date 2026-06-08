@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前已完成任务 001，并补上了任务 003 的首版能力：
+当前已完成任务 001、003、004 和 005 的首版能力：
 
 - 建立了可运行的 CLI 骨架
 - 明确了首版技术选型与目录结构
@@ -13,6 +13,10 @@
 - 支持为指定 slide 生成候选对象 JSON
 - 支持通过 LibreOffice 渲染高还原度预览图
 - 支持输出目标检测风格的标注框预览图
+- 支持 `init -> inspect/show/template detect -> finish` 单会话工作流
+- 支持通过后台 server 复用当前 PPT 的加载与解析现场
+- 支持创建模板草稿 JSON，并逐页确认模板字段
+- 支持生成 `template.pptx + manifest.json` 模板包
 
 ## 技术选型
 
@@ -23,7 +27,7 @@
 - **数据模型路线**：内部采用 Python `dataclass`；对外 JSON 协议采用显式 schema 文档，后续可升级到 Pydantic
 - **预览路线**：通过 LibreOffice headless 将 PPT 转 PDF/图片
 
-更完整的论证见 [docs/tech-selection.md](docs/tech-selection.md)。
+更完整的论证见 [docs/tech-selection.md](docs/tech-selection.md)。会话模式说明见 [docs/session-lifecycle.md](docs/session-lifecycle.md)。
 
 ## 目录结构
 
@@ -43,11 +47,13 @@
 │       ├── cli.py
 │       ├── inspect.py
 │       ├── models.py
-│       └── show.py
+│       ├── show.py
+│       └── template_ops.py
 ├── tasks/
 └── tests/
     ├── test_cli.py
-    └── test_show.py
+│   ├── test_show.py
+│   └── test_template.py
 ```
 
 ## 快速开始
@@ -80,28 +86,49 @@ uv run pptxcli demo form
 - `pptxcli version`：查看版本
 - `pptxcli demo form`：输出最小表单 JSON 示例
 - `pptxcli tech`：输出技术路线摘要
+- `pptxcli init --origin_file ./demo.pptx`：启动单会话后台服务
+- `pptxcli inspect --input ./demo.pptx --slide 0`：输出指定页全部对象的调试 JSON
+- `pptxcli inspect --slide 0`：复用当前会话输出指定页全部对象的调试 JSON
 - `pptxcli show --input ./demo.pptx --slide 0`：渲染指定页预览图
+- `pptxcli show --slide 0`：复用当前会话渲染预览图
 - `pptxcli show --input ./demo.pptx --slide 0 --annotate`：输出带编号框的标注图
+- `pptxcli template detect --slide 0 --annotate`：复用当前会话输出模板候选标注图
+- `pptxcli template create --name demo_template`：基于当前会话创建模板草稿 JSON
+- `pptxcli template add_slide --slide 0 -f "1:title" -f "2:author"`：将当前页字段选择写入当前模板草稿
+- `pptxcli template save`：裁剪当前模板对应的原始 PPTX 并生成模板包
+- `pptxcli finish`：关闭当前会话并清理状态文件
 
-## 任务 003 示例
+## 会话模式示例
 
 ```bash
-pptxcli show --input ./demo.pptx --slide 0 --annotate
+pptxcli init --origin_file ./demo.pptx
+pptxcli template create --name quarterly_report
+pptxcli template detect --slide 0 --annotate --candidates-out ./slide-0.candidates.json
+# agent 看标注图后，直接选择字段编号和说明
+pptxcli template add_slide --slide 0 \
+  -f "1:main title" \
+  -f "2:cover image"
+pptxcli template save
+pptxcli finish
 ```
 
-该命令会：
+这组命令会：
 
-- 使用 `python-pptx` 提取指定页中的 text/image 候选对象
-- 使用 LibreOffice headless 将 PPT 转成高还原度 PDF 预览
-- 将对应页渲染为 PNG
-- 在 PNG 上叠加类似目标检测任务的醒目标注框，并在框内左上角绘制编号块
-- 向标准输出打印候选对象 JSON 和输出图片路径
+- 启动单实例后台 server，并预加载当前 PPT
+- 在不重复传入 `--input` 的情况下复用当前会话
+- 使用 `inspect` 在调试时输出指定页的全部对象
+- 使用 LibreOffice headless 将 PPT 转成高还原度预览图
+- 使用 `template detect/show --annotate` 提取 text/image 候选对象
+- 将 agent 通过命令行选中的字段写入模板草稿 JSON
+- 模板页名默认使用 `slide_<index>`
+- 裁剪原始 PPTX，仅保留选中的模板页，并生成 `manifest.json`
+- 在结束时关闭 server 并清理状态文件
 
 ## 后续任务映射
 
 - 任务 002：补充 PPTX 解包与中间模型
 - 任务 003：实现候选检测和视觉标注
-- 任务 004：生成模板包与 manifest
+- 任务 004：会话化服务与状态管理
 - 任务 005：模板填充并输出新 PPT
 - 任务 006：局部修改与预览
 - 任务 007：稳定 Agent 交互协议

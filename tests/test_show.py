@@ -13,7 +13,7 @@ from pptx import Presentation
 from pptx.util import Inches
 
 from pptx_cli.cli import main
-from pptx_cli.inspect import inspect_slide
+from pptx_cli.inspect import inspect_slide, inspect_slide_objects
 from pptx_cli.models import BBox, Candidate
 from pptx_cli.show import _fit_label_layout, annotate_candidates
 
@@ -39,6 +39,25 @@ class ShowCommandTest(unittest.TestCase):
             self.assertEqual(result.candidates[0].kind, "text")
             self.assertEqual(result.candidates[0].role_hint, "title")
             self.assertEqual(result.candidates[1].kind, "image")
+
+    def test_inspect_slide_objects_returns_all_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            pptx_path = tmp_dir / "demo.pptx"
+
+            presentation = Presentation()
+            slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+            slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1)).text_frame.text = (
+                "Quarterly Review"
+            )
+            slide.shapes.add_shape(1, Inches(1), Inches(2), Inches(2), Inches(1))
+            presentation.save(pptx_path)
+
+            result = inspect_slide_objects(pptx_path, 0)
+
+            self.assertEqual(len(result.objects), 2)
+            self.assertEqual(result.objects[0].object_type, "text")
+            self.assertEqual(result.objects[1].object_type, "shape")
 
     def test_annotate_candidates_draws_boxes(self) -> None:
         base_image = Image.new("RGB", (400, 300), "white")

@@ -48,3 +48,41 @@ class SlideCandidates:
             },
             "candidates": [candidate.to_dict() for candidate in self.candidates],
         }
+
+
+@dataclass(slots=True)
+class SlideObject:
+    index: int
+    shape_id: int
+    object_type: str
+    shape_type: str
+    bbox: BBox
+    name: str | None = None
+    text: str | None = None
+    image_name: str | None = None
+    is_placeholder: bool = False
+    placeholder_type: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["bbox"] = self.bbox.to_dict()
+        return payload
+
+
+@dataclass(slots=True)
+class SlideObjects:
+    slide_index: int
+    slide_width: int
+    slide_height: int
+    objects: list[SlideObject]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "slide_index": self.slide_index,
+            "slide_size": {
+                "width": self.slide_width,
+                "height": self.slide_height,
+                "unit": "emu",
+            },
+            "objects": [item.to_dict() for item in self.objects],
+        }

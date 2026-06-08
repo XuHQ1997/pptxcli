@@ -37,8 +37,37 @@ def cmd_show(
     annotate: bool,
     output_path: Path | None,
     candidates_out: Path | None,
+    command_name: str = "show",
+    presentation: object | None = None,
 ) -> int:
-    slide_data = inspect_slide(input_path=input_path, slide_index=slide_index)
+    payload = build_show_payload(
+        command_name=command_name,
+        input_path=input_path,
+        slide_index=slide_index,
+        annotate=annotate,
+        output_path=output_path,
+        candidates_out=candidates_out,
+        presentation=presentation,
+    )
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    return 0
+
+
+def build_show_payload(
+    *,
+    command_name: str,
+    input_path: Path,
+    slide_index: int,
+    annotate: bool,
+    output_path: Path | None,
+    candidates_out: Path | None,
+    presentation: object | None = None,
+) -> dict[str, object]:
+    slide_data = inspect_slide(
+        input_path=input_path,
+        slide_index=slide_index,
+        presentation=presentation,
+    )
     image = render_slide_preview(input_path=input_path, slide_index=slide_index)
 
     if annotate:
@@ -68,7 +97,7 @@ def cmd_show(
     payload = slide_data.to_dict()
     payload.update(
         {
-            "command": "show",
+            "command": command_name,
             "input": str(input_path),
             "annotated": annotate,
             "image_path": str(resolved_output),
@@ -77,8 +106,7 @@ def cmd_show(
     if candidates_out is not None:
         payload["candidates_path"] = str(candidates_out)
 
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
-    return 0
+    return payload
 
 
 def render_slide_preview(input_path: Path, slide_index: int) -> Image.Image:
