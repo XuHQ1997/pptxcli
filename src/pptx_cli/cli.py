@@ -210,8 +210,11 @@ def _add_edit_fill_template_parser(parser: argparse.ArgumentParser) -> None:
         "--field",
         "-f",
         action="append",
-        required=True,
         help='Field selector in the form "index:value"; repeat for multiple fields',
+    )
+    parser.add_argument(
+        "--content",
+        help="Optional JSON string describing nested Container content to append onto the filled slide",
     )
 
 
@@ -538,6 +541,7 @@ def main(argv: list[str] | None = None) -> int:
                 payload = fill_template_into_edit_presentation(
                     slide_index=args.slide,
                     field_specs=args.field,
+                    content_spec=args.content,
                 )
             except Exception as exc:
                 return cmd_error("edit fill_template", str(exc))

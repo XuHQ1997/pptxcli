@@ -18,6 +18,7 @@
 - 支持创建模板草稿 JSON，并逐页确认模板字段
 - 支持生成 `template.pptx + manifest.json` 模板包
 - 支持通过命令行 `--slide + --field` 填充模板并生成新的 PPTX
+- 支持通过 `edit fill_template --content '<json>'` 追加嵌套 Container 主体内容
 
 ## 技术选型
 
@@ -100,6 +101,7 @@ uv run pptxcli demo form
 - `pptxcli edit create --template demo_template --output ./new.pptx`：创建一个基于模板的编辑草稿
 - `pptxcli edit show_template --slide 0`：查看当前编辑模板某一页有哪些 field 需要填充
 - `pptxcli edit fill_template --slide 0 -f "1:main title" -f "2:./cover.png"`：向当前编辑草稿追加一页已填充的模板页
+- `pptxcli edit fill_template --slide 0 -f "1:main title" --content '{"layout":"vertical","children":[...]}'`：在模板字段之外追加 Container 主体内容
 - `pptxcli edit save`：保存当前编辑草稿并生成最终 PPTX
 
 ## 会话模式示例
@@ -136,8 +138,62 @@ pptxcli edit save
 - 使用 `edit create` 创建编辑中的目标 PPT 草稿，并把 session mode 切换到 `edit_ppt`
 - 使用 `edit show_template --slide ...` 查看指定模板页的字段编号、类型和说明
 - 使用 `edit fill_template --slide ... --field index:value` 逐页追加已填充的模板页，并校验 text/image 字段
+- 使用 `edit fill_template --content <json>` 定义 slide 主体的 Vertical / Horizontal / Grid Container 布局树
 - 使用 `edit save` 落盘最终 PPTX，并把 session mode 切回模板提取态
 - 后台 server 在空闲 3 分钟后自动退出并清理状态文件
+
+## Container 内容 JSON
+
+`edit fill_template --content` 接收一个 JSON 对象。根节点和子节点都支持嵌套，当前支持三种容器布局：
+
+- `layout: "vertical"`
+- `layout: "horizontal"`
+- `layout: "grid"`
+
+叶子节点支持：
+
+- `type: "text"`：文本内容
+- `type: "image"`：位图文件
+- `type: "svg"`：SVG 文件
+
+常用字段包括：
+
+- `bbox`：根容器的绝对区域，单位为 EMU；省略时默认铺满整页
+- `padding` / `gap`：容器内边距与子元素间距
+- `width` / `height` / `min_width` / `min_height`：尺寸约束
+- `grow`：在线性布局中参与剩余空间分配
+- `align` / `cross_align`：主轴与交叉轴对齐
+- `columns` / `rows` / `column_weights` / `row_weights`：Grid 行列配置
+- `style`：文本样式，如 `font_size`、`font_name`、`bold`、`color`
+
+示例：
+
+```bash
+pptxcli edit fill_template --slide 0 \
+  -f "1:Quarterly Review" \
+  --content '{
+    "layout": "vertical",
+    "bbox": {"x": 731520, "y": 1463040, "w": 5486400, "h": 2743200},
+    "gap": 109728,
+    "children": [
+      {
+        "type": "text",
+        "height": 548640,
+        "text": "Agenda",
+        "style": {"font_size": 20, "bold": true}
+      },
+      {
+        "layout": "horizontal",
+        "grow": 1,
+        "gap": 109728,
+        "children": [
+          {"type": "text", "grow": 1, "text": "Summary Block"},
+          {"type": "image", "width": 1371600, "path": "./cover.png", "fit": "contain"}
+        ]
+      }
+    ]
+  }'
+```
 
 ## 后续任务映射
 

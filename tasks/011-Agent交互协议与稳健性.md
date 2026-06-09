@@ -1,4 +1,4 @@
-# 任务 009：Agent 交互协议与稳健性
+# 任务 011：Agent 交互协议与稳健性
 
 ## 目标
 
@@ -6,7 +6,7 @@
 
 ## 主要工作
 
-- 统一 init / inspect / decision / manifest / form / svg / finish 的 JSON 协议
+- 统一 init / inspect / decision / manifest / form / container / textbox / svg / finish 的 JSON 协议
 - 约定错误码与失败提示
 - 设计字段命名规范与默认规则
 - 梳理典型 Agent 工作流示例

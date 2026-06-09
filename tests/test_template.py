@@ -11,6 +11,11 @@ from PIL import Image
 from pptx import Presentation
 from pptx.util import Inches, Pt
 
+from pptx_cli.container_layout import (
+    flatten_resolved_leaves,
+    parse_content_spec,
+    solve_content_layout,
+)
 from pptx_cli.inspect import inspect_slide
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,6 +137,54 @@ def collect_slide_embed_relationships(pptx_path: Path) -> list[dict[str, set[str
 
 
 class TemplateWorkflowTest(unittest.TestCase):
+    def test_container_layout_solves_nested_vertical_horizontal_tree(self) -> None:
+        content_payload = {
+            "layout": "vertical",
+            "padding": 100,
+            "gap": 20,
+            "children": [
+                {
+                    "type": "text",
+                    "name": "title",
+                    "height": 200,
+                    "text": "Quarterly Review",
+                },
+                {
+                    "layout": "horizontal",
+                    "name": "body",
+                    "grow": 1,
+                    "gap": 10,
+                    "children": [
+                        {
+                            "type": "text",
+                            "name": "left",
+                            "grow": 1,
+                            "text": "Left Column",
+                        },
+                        {
+                            "type": "text",
+                            "name": "right",
+                            "width": 300,
+                            "text": "Right Column",
+                        },
+                    ],
+                },
+            ],
+        }
+
+        tree = parse_content_spec(
+            json.dumps(content_payload),
+            slide_width=1000,
+            slide_height=800,
+        )
+        resolved = solve_content_layout(tree, slide_width=1000, slide_height=800)
+        leaves = {leaf.name: leaf.bbox for leaf in flatten_resolved_leaves(resolved)}
+
+        self.assertEqual(resolved.bbox.to_dict(), {"x": 0, "y": 0, "w": 1000, "h": 800})
+        self.assertEqual(leaves["title"].to_dict(), {"x": 100, "y": 100, "w": 800, "h": 200})
+        self.assertEqual(leaves["left"].to_dict(), {"x": 100, "y": 320, "w": 490, "h": 380})
+        self.assertEqual(leaves["right"].to_dict(), {"x": 600, "y": 320, "w": 300, "h": 380})
+
     def test_template_create_add_slide_save_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)
@@ -826,6 +879,139 @@ class TemplateWorkflowTest(unittest.TestCase):
             slide_relationships = collect_slide_embed_relationships(output_path)
             self.assertTrue(slide_relationships[0]["embed_ids"])
             self.assertTrue(slide_relationships[0]["embed_ids"].issubset(slide_relationships[0]["rel_ids"]))
+
+            finish_result = run_cli("finish", env=env)
+            self.assertEqual(finish_result.returncode, 0, finish_result.stderr)
+
+    def test_edit_fill_template_supports_nested_container_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            state_file = tmp_dir / ".pptxcli-session.json"
+            template_root = tmp_dir / "template-store"
+            pptx_path = tmp_dir / "demo.pptx"
+            content_image_path = tmp_dir / "content.png"
+            output_path = tmp_dir / "content-output.pptx"
+
+            Image.new("RGB", (120, 60), "purple").save(content_image_path)
+
+            presentation = Presentation()
+            slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+            slide.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(5), Inches(0.8)).text_frame.text = (
+                "Template Title"
+            )
+            presentation.save(pptx_path)
+
+            slide_candidates = inspect_slide(pptx_path, 0).candidates
+
+            env = os.environ.copy()
+            env["PPTXCLI_STATE_FILE"] = str(state_file)
+            env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
+
+            self.assertEqual(
+                run_cli(
+                    "template",
+                    "create",
+                    "--from",
+                    str(pptx_path),
+                    "--name",
+                    "container_content",
+                    env=env,
+                ).returncode,
+                0,
+            )
+            self.assertEqual(
+                run_cli(
+                    "template",
+                    "add_slide",
+                    "--slide",
+                    "0",
+                    "-f",
+                    f"{slide_candidates[0].index}:page title",
+                    env=env,
+                ).returncode,
+                0,
+            )
+            self.assertEqual(run_cli("template", "save", env=env).returncode, 0)
+            self.assertEqual(
+                run_cli(
+                    "edit",
+                    "create",
+                    "--output",
+                    str(output_path),
+                    "--template",
+                    "container_content",
+                    env=env,
+                ).returncode,
+                0,
+            )
+
+            content_payload = {
+                "layout": "vertical",
+                "bbox": {
+                    "x": int(Inches(0.8)),
+                    "y": int(Inches(1.6)),
+                    "w": int(Inches(6.0)),
+                    "h": int(Inches(3.0)),
+                },
+                "gap": int(Inches(0.15)),
+                "children": [
+                    {
+                        "type": "text",
+                        "name": "agenda",
+                        "height": int(Inches(0.6)),
+                        "text": "Agenda",
+                        "style": {"font_size": 20, "bold": True},
+                    },
+                    {
+                        "layout": "horizontal",
+                        "name": "body",
+                        "grow": 1,
+                        "gap": int(Inches(0.15)),
+                        "children": [
+                            {
+                                "type": "text",
+                                "name": "summary",
+                                "grow": 1,
+                                "text": "Summary Block",
+                            },
+                            {
+                                "type": "image",
+                                "name": "hero_image",
+                                "width": int(Inches(1.5)),
+                                "path": str(content_image_path),
+                                "fit": "contain",
+                            },
+                        ],
+                    },
+                ],
+            }
+
+            fill_result = run_cli(
+                "edit",
+                "fill_template",
+                "--slide",
+                "0",
+                "-f",
+                f"{slide_candidates[0].index}:Launch Plan",
+                "--content",
+                json.dumps(content_payload),
+                env=env,
+            )
+            self.assertEqual(fill_result.returncode, 0, fill_result.stderr)
+            fill_payload = json.loads(fill_result.stdout)
+            self.assertEqual(fill_payload["content_count"], 3)
+            self.assertEqual(fill_payload["field_count"], 1)
+            self.assertIsInstance(fill_payload["content_layout"], dict)
+            self.assertEqual(len(fill_payload["rendered_content"]), 3)
+
+            self.assertEqual(run_cli("edit", "save", env=env).returncode, 0)
+
+            output_presentation = Presentation(str(output_path))
+            self.assertEqual(len(output_presentation.slides), 1)
+            self.assertIn("Launch Plan", collect_slide_texts(output_presentation)[0])
+            self.assertIn("Agenda", collect_slide_texts(output_presentation)[0])
+            self.assertIn("Summary Block", collect_slide_texts(output_presentation)[0])
+            self.assertEqual(collect_slide_image_sizes(output_presentation), [[(120, 60)]])
 
             finish_result = run_cli("finish", env=env)
             self.assertEqual(finish_result.returncode, 0, finish_result.stderr)

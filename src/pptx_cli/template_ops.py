@@ -15,6 +15,11 @@ from pptx import Presentation
 from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.oxml.ns import qn
 
+from .container_layout import (
+    parse_content_spec,
+    render_resolved_content,
+    solve_content_layout,
+)
 from .session import (
     SessionError,
     cleanup_stale_session_state,
@@ -261,7 +266,8 @@ def show_template_fields_for_edit(
 def fill_template_into_edit_presentation(
     *,
     slide_index: int,
-    field_specs: list[str],
+    field_specs: list[str] | None,
+    content_spec: str | None = None,
 ) -> dict[str, Any]:
     state = _load_session_metadata(required=True)
     edit_context = _require_edit_context(state)
@@ -290,6 +296,24 @@ def fill_template_into_edit_presentation(
         shape_map=shape_map,
         assignments=requested_slide["assignments"],
     )
+    rendered_content: list[dict[str, Any]] = []
+    resolved_content_payload: dict[str, Any] | None = None
+    if content_spec is not None:
+        content_tree = parse_content_spec(
+            content_spec,
+            slide_width=int(output_presentation.slide_width),
+            slide_height=int(output_presentation.slide_height),
+        )
+        resolved_content = solve_content_layout(
+            content_tree,
+            slide_width=int(output_presentation.slide_width),
+            slide_height=int(output_presentation.slide_height),
+        )
+        rendered_content = render_resolved_content(
+            slide=output_slide,
+            resolved=resolved_content,
+        )
+        resolved_content_payload = resolved_content.to_dict()
     output_presentation.save(str(working_pptx_path))
 
     filled_slides = list(edit_context.get("filled_slides") or [])
@@ -318,8 +342,11 @@ def fill_template_into_edit_presentation(
         "working_pptx_path": str(working_pptx_path),
         "slide_count": len(output_presentation.slides),
         "field_count": len(requested_slide["assignments"]),
+        "content_count": len(rendered_content),
         "slide": requested_slide["slide_name"],
         "template_slide_index": requested_slide["template_slide_index"],
+        "content_layout": resolved_content_payload,
+        "rendered_content": rendered_content,
     }
 
 
@@ -659,7 +686,7 @@ def _load_manifest(manifest_path: Path) -> dict[str, Any]:
 def _build_fill_request(
     *,
     slide_index: int,
-    field_specs: list[str],
+    field_specs: list[str] | None,
     manifest: dict[str, Any],
 ) -> dict[str, Any]:
     manifest_slide = _resolve_manifest_slide(
@@ -696,14 +723,16 @@ def _resolve_manifest_slide(
 def _validate_fill_fields(
     *,
     manifest_slide: dict[str, Any],
-    field_specs: list[str],
+    field_specs: list[str] | None,
 ) -> list[dict[str, Any]]:
     manifest_fields = manifest_slide.get("fields")
-    if not isinstance(manifest_fields, list) or not manifest_fields:
+    if not isinstance(manifest_fields, list):
         raise ValueError(f"manifest slide has no fields: {manifest_slide.get('slide_name')}")
 
+    if not manifest_fields:
+        return []
     if not field_specs:
-        raise ValueError("fill_template requires at least one --field")
+        raise ValueError("fill_template requires at least one --field; field input is required")
 
     fields_by_index: dict[int, dict[str, Any]] = {}
     for field in manifest_fields:
