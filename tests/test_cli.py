@@ -41,7 +41,12 @@ class CliSmokeTest(unittest.TestCase):
     def test_edit_help_runs(self) -> None:
         result = run_cli("edit", "--help")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("--create", result.stdout)
+        self.assertIn("create", result.stdout)
+
+    def test_edit_create_help_runs(self) -> None:
+        result = run_cli("edit", "create", "--help")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--output", result.stdout)
 
     def test_edit_show_template_help_runs(self) -> None:
         result = run_cli("edit", "show_template", "--help")

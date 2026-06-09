@@ -2,41 +2,37 @@
 
 ## 目标
 
-`pptx_cli` 通过 `init -> 多轮命令 -> finish` 的单会话模式复用当前 PPT 的加载与解析现场，避免每次命令都重复传入完整上下文。
+`pptx_cli` 通过“首次模板命令自动启动会话 -> 多轮命令复用 -> 空闲自动退出”的模式复用当前 PPT 的加载与解析现场，避免每次命令都重复传入完整上下文。
 
 ## 命令
 
-### 1. 启动会话
+### 1. 自动启动会话
 
 ```bash
-pptxcli init --origin_file ./demo.pptx
+pptxcli template create --from ./demo.pptx --name quarterly_report
 ```
 
-- 启动单实例后台 HTTP server
+- 自动启动单实例后台 HTTP server
 - 由 server 预加载 `Presentation`
 - 将监听地址和源文件路径写入状态文件
 
 ### 2. 复用会话
 
-在已有会话下，`inspect`、`show`、`template detect` 可以省略 `--input`：
+在已有会话下，`inspect`、`show`、`template show` 可以省略 `--input`：
 
 ```bash
 pptxcli inspect --slide 0
 pptxcli show --slide 0 --annotate
-pptxcli template detect --slide 0 --annotate
+pptxcli template show --slide 0 --annotate
 ```
 
-如果仍显式传入 `--input`，命令会按一次性本地模式直接执行，不依赖当前会话。
+如果对 `inspect/show` 显式传入 `--input`，命令会按一次性本地模式直接执行；如果对 `template show` 显式传入 `--input`，命令会自动启动或复用会话。
 
-### 3. 结束会话
+### 3. 自动结束会话
 
-```bash
-pptxcli finish
-```
-
-- 向后台 server 发送关闭请求
+- 后台 server 空闲 3 分钟后自动退出
 - 删除状态文件
-- 清理失效会话的遗留状态
+- 丢弃未完成的内部状态与工作进度
 
 ## 状态文件
 
@@ -67,7 +63,7 @@ pptxcli finish
 
 ## 异常处理
 
-- 若 `init` 发现已有可用会话，会拒绝重复启动并提示先执行 `finish`
-- 若状态文件存在但 server 不可达，会先清理失效状态，再允许重新 `init`
-- 若复用命令未找到可用会话，会返回明确错误并提示重新初始化
-- `finish` 遇到失效 server 时会删除陈旧状态文件，避免会话卡死
+- 若自动启动时发现已有可用会话，会优先复用同一个源文件对应的会话
+- 若状态文件存在但 server 不可达，会先清理失效状态，再允许重新启动
+- 若复用命令未找到可用会话，会返回明确错误并提示重新开始模板流程
+- 仍保留内部 `finish` 调试命令，用于测试或手动清理会话

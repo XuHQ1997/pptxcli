@@ -35,7 +35,7 @@ def load_session_state(state_file: Path) -> dict[str, Any]:
     payload = load_session_state_if_exists(state_file)
     if payload is None:
         raise SessionError(
-            f"no active session state file found: {state_file}. Run `pptxcli init --origin_file <file>` first."
+            f"no active session state file found: {state_file}. Start with `pptxcli template create --from <file> --name <name>` first."
         )
     return payload
 
@@ -109,7 +109,7 @@ def session_request(
     if not isinstance(server_url, str) or not server_url:
         mode = str(state.get("mode", "idle")).strip() or "idle"
         raise SessionError(
-            f"current session mode is `{mode}` and has no live session server. Run `pptxcli init --origin_file <file>` first."
+            f"current session mode is `{mode}` and has no live session server. Start a new workflow with `pptxcli template create --from <file> --name <name>`."
         )
 
     url = server_url.rstrip("/") + route
@@ -128,7 +128,7 @@ def session_request(
         raise SessionError(f"session server returned HTTP {exc.code}: {detail}") from exc
     except error.URLError as exc:
         raise SessionError(
-            f"session server is unavailable at {server_url}. Run `pptxcli init --origin_file <file>` again or clean stale state {state_file}."
+            f"session server is unavailable at {server_url}. Re-run `pptxcli template create --from <file> --name <name>` or clean stale state {state_file}."
         ) from exc
 
     if not content:
@@ -166,7 +166,7 @@ def assert_no_active_session(state_file: Path) -> None:
     if not isinstance(server_url, str) or not server_url:
         mode = str(state.get("mode", "idle")).strip() or "idle"
         raise SessionError(
-            f"an active local session already exists in mode `{mode}`. Run `pptxcli finish` before starting another session."
+            f"an active local session already exists in mode `{mode}`. Reuse it or wait for timeout before starting another session."
         )
     try:
         health = session_request(
@@ -181,7 +181,7 @@ def assert_no_active_session(state_file: Path) -> None:
 
     origin_file = health.get("origin_file", "unknown")
     raise SessionError(
-        f"an active session already exists for {origin_file}. Run `pptxcli finish` before starting another session."
+        f"an active session already exists for {origin_file}. Reuse it or wait for timeout before starting another session."
     )
 
 
@@ -259,3 +259,42 @@ def start_session_server(
 
     process.terminate()
     raise SessionError("session server startup timed out before becoming ready.")
+
+
+def ensure_session_for_origin(
+    *,
+    origin_file: Path,
+    state_file: Path,
+) -> dict[str, Any]:
+    resolved_origin = origin_file.expanduser().resolve()
+    if not resolved_origin.exists():
+        raise SessionError(f"origin file does not exist: {resolved_origin}")
+
+    state = load_session_state_if_exists(state_file)
+    if state is None:
+        return start_session_server(origin_file=resolved_origin, state_file=state_file)
+
+    server_url = state.get("server_url")
+    if isinstance(server_url, str) and server_url.strip():
+        try:
+            health = session_request(
+                state_file=state_file,
+                method="GET",
+                route="/health",
+                timeout=1.0,
+            )
+        except SessionError:
+            cleanup_session_artifacts(state_file)
+            remove_session_state(state_file)
+            return start_session_server(origin_file=resolved_origin, state_file=state_file)
+
+        active_origin = Path(str(health.get("origin_file", ""))).resolve()
+        if active_origin != resolved_origin:
+            raise SessionError(
+                f"an active session already exists for {active_origin}. Reuse it or wait for timeout before switching to {resolved_origin}."
+            )
+        return health
+
+    cleanup_session_artifacts(state_file)
+    remove_session_state(state_file)
+    return start_session_server(origin_file=resolved_origin, state_file=state_file)

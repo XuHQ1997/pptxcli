@@ -18,6 +18,7 @@ from pptx.oxml.ns import qn
 from .session import (
     SessionError,
     cleanup_stale_session_state,
+    ensure_session_for_origin,
     load_session_state_if_exists,
     load_session_state,
     resolve_state_file_path,
@@ -41,9 +42,10 @@ def resolve_template_root(cli_argv0: str | None = None) -> Path:
 def create_template_draft(
     *,
     name: str,
+    from_file: Path | None = None,
 ) -> dict[str, Any]:
     template_name = normalize_template_name(name)
-    origin_file = _resolve_origin_file()
+    origin_file = _resolve_origin_file(from_file=from_file)
     draft_path = resolve_template_root() / f"{template_name}.json"
     if draft_path.exists():
         raise ValueError(f"template draft already exists: {draft_path}")
@@ -182,7 +184,7 @@ def create_edit_presentation(
     state = _load_session_metadata()
     edit_context = state.get("edit_context")
     if isinstance(edit_context, dict) and str(edit_context.get("working_pptx_path", "")).strip():
-        raise ValueError("an edit draft is already active; run `pptxcli edit save` or `pptxcli finish` first")
+        raise ValueError("an edit draft is already active; run `pptxcli edit save` or wait for timeout first")
 
     manifest_path, template_pptx_path = _resolve_template_package_paths(
         template_ref=template_ref,
@@ -368,8 +370,17 @@ def _resolve_template_name() -> str:
     return normalize_template_name(active_template)
 
 
-def _resolve_origin_file() -> Path:
+def _resolve_origin_file(*, from_file: Path | None = None) -> Path:
     state_file = resolve_state_file_path()
+    if from_file is not None:
+        origin_file = from_file.expanduser().resolve()
+        try:
+            ensure_session_for_origin(origin_file=origin_file, state_file=state_file)
+        except SessionError as exc:
+            cleanup_stale_session_state(state_file)
+            raise ValueError(str(exc)) from exc
+        return origin_file
+
     try:
         session_request(state_file=state_file, method="GET", route="/health", timeout=1.0)
         state = load_session_state(state_file)
@@ -1120,7 +1131,7 @@ def _load_session_metadata(*, required: bool = False) -> dict[str, Any]:
     if state is None:
         if required:
             raise ValueError(
-                f"no active session state file found: {state_file}. Run `pptxcli init --origin_file <file>` or `pptxcli edit --create <output>` first."
+                f"no active session state file found: {state_file}. Start with `pptxcli template create --from <file> --name <name>` or `pptxcli edit create --template <name> --output <file>` first."
             )
         return {}
     return state
@@ -1145,7 +1156,7 @@ def _require_edit_context(state: dict[str, Any]) -> dict[str, Any]:
     edit_context = state.get("edit_context")
     if mode != "edit_ppt" or not isinstance(edit_context, dict):
         raise ValueError(
-            "no active edit draft found. Run `pptxcli edit --create <output> --template <name>` first."
+            "no active edit draft found. Run `pptxcli edit create --template <name> --output <file>` first."
         )
     return edit_context
 

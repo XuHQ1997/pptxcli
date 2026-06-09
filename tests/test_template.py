@@ -169,10 +169,15 @@ class TemplateWorkflowTest(unittest.TestCase):
             env["PPTXCLI_STATE_FILE"] = str(state_file)
             env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
 
-            init_result = run_cli("init", "--origin_file", str(pptx_path), env=env)
-            self.assertEqual(init_result.returncode, 0, init_result.stderr)
-
-            create_result = run_cli("template", "create", "--name", "demo_template.pptx", env=env)
+            create_result = run_cli(
+                "template",
+                "create",
+                "--from",
+                str(pptx_path),
+                "--name",
+                "demo_template.pptx",
+                env=env,
+            )
             self.assertEqual(create_result.returncode, 0, create_result.stderr)
             create_payload = json.loads(create_result.stdout)
             self.assertEqual(create_payload["template_name"], "demo_template")
@@ -283,10 +288,16 @@ class TemplateWorkflowTest(unittest.TestCase):
             env["PPTXCLI_STATE_FILE"] = str(state_file)
             env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
 
-            init_result = run_cli("init", "--origin_file", str(pptx_path), env=env)
-            self.assertEqual(init_result.returncode, 0, init_result.stderr)
             self.assertEqual(
-                run_cli("template", "create", "--name", "demo_fill", env=env).returncode,
+                run_cli(
+                    "template",
+                    "create",
+                    "--from",
+                    str(pptx_path),
+                    "--name",
+                    "demo_fill",
+                    env=env,
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -317,7 +328,8 @@ class TemplateWorkflowTest(unittest.TestCase):
 
             create_edit_result = run_cli(
                 "edit",
-                "--create",
+                "create",
+                "--output",
                 str(output_path),
                 "--template",
                 "demo_fill",
@@ -422,11 +434,15 @@ class TemplateWorkflowTest(unittest.TestCase):
             env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
 
             self.assertEqual(
-                run_cli("init", "--origin_file", str(pptx_path), env=env).returncode,
-                0,
-            )
-            self.assertEqual(
-                run_cli("template", "create", "--name", "demo_show", env=env).returncode,
+                run_cli(
+                    "template",
+                    "create",
+                    "--from",
+                    str(pptx_path),
+                    "--name",
+                    "demo_show",
+                    env=env,
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -447,7 +463,8 @@ class TemplateWorkflowTest(unittest.TestCase):
             self.assertEqual(
                 run_cli(
                     "edit",
-                    "--create",
+                    "create",
+                    "--output",
                     str(output_path),
                     "--template",
                     "demo_show",
@@ -520,11 +537,15 @@ class TemplateWorkflowTest(unittest.TestCase):
             env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
 
             self.assertEqual(
-                run_cli("init", "--origin_file", str(pptx_path), env=env).returncode,
-                0,
-            )
-            self.assertEqual(
-                run_cli("template", "create", "--name", "demo_style", env=env).returncode,
+                run_cli(
+                    "template",
+                    "create",
+                    "--from",
+                    str(pptx_path),
+                    "--name",
+                    "demo_style",
+                    env=env,
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -543,7 +564,8 @@ class TemplateWorkflowTest(unittest.TestCase):
             self.assertEqual(
                 run_cli(
                     "edit",
-                    "--create",
+                    "create",
+                    "--output",
                     str(output_path),
                     "--template",
                     "demo_style",
@@ -614,11 +636,15 @@ class TemplateWorkflowTest(unittest.TestCase):
             env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
 
             self.assertEqual(
-                run_cli("init", "--origin_file", str(pptx_path), env=env).returncode,
-                0,
-            )
-            self.assertEqual(
-                run_cli("template", "create", "--name", "demo_multiline_style", env=env).returncode,
+                run_cli(
+                    "template",
+                    "create",
+                    "--from",
+                    str(pptx_path),
+                    "--name",
+                    "demo_multiline_style",
+                    env=env,
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -637,7 +663,8 @@ class TemplateWorkflowTest(unittest.TestCase):
             self.assertEqual(
                 run_cli(
                     "edit",
-                    "--create",
+                    "create",
+                    "--output",
                     str(output_path),
                     "--template",
                     "demo_multiline_style",
@@ -731,11 +758,15 @@ class TemplateWorkflowTest(unittest.TestCase):
             env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
 
             self.assertEqual(
-                run_cli("init", "--origin_file", str(pptx_path), env=env).returncode,
-                0,
-            )
-            self.assertEqual(
-                run_cli("template", "create", "--name", "group_layout", env=env).returncode,
+                run_cli(
+                    "template",
+                    "create",
+                    "--from",
+                    str(pptx_path),
+                    "--name",
+                    "group_layout",
+                    env=env,
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -756,7 +787,8 @@ class TemplateWorkflowTest(unittest.TestCase):
             self.assertEqual(
                 run_cli(
                     "edit",
-                    "--create",
+                    "create",
+                    "--output",
                     str(output_path),
                     "--template",
                     "group_layout",
@@ -818,11 +850,15 @@ class TemplateWorkflowTest(unittest.TestCase):
             env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
 
             self.assertEqual(
-                run_cli("init", "--origin_file", str(pptx_path), env=env).returncode,
-                0,
-            )
-            self.assertEqual(
-                run_cli("template", "create", "--name", "demo_text_fill", env=env).returncode,
+                run_cli(
+                    "template",
+                    "create",
+                    "--from",
+                    str(pptx_path),
+                    "--name",
+                    "demo_text_fill",
+                    env=env,
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -876,11 +912,15 @@ class TemplateWorkflowTest(unittest.TestCase):
             env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
 
             self.assertEqual(
-                run_cli("init", "--origin_file", str(pptx_path), env=env).returncode,
-                0,
-            )
-            self.assertEqual(
-                run_cli("template", "create", "--name", "demo_error", env=env).returncode,
+                run_cli(
+                    "template",
+                    "create",
+                    "--from",
+                    str(pptx_path),
+                    "--name",
+                    "demo_error",
+                    env=env,
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -899,7 +939,8 @@ class TemplateWorkflowTest(unittest.TestCase):
             self.assertEqual(
                 run_cli(
                     "edit",
-                    "--create",
+                    "create",
+                    "--output",
                     str(output_path),
                     "--template",
                     "demo_error",
@@ -943,11 +984,15 @@ class TemplateWorkflowTest(unittest.TestCase):
             env["PPTXCLI_TEMPLATE_ROOT"] = str(template_root)
 
             self.assertEqual(
-                run_cli("init", "--origin_file", str(pptx_path), env=env).returncode,
-                0,
-            )
-            self.assertEqual(
-                run_cli("template", "create", "--name", "demo_error2", env=env).returncode,
+                run_cli(
+                    "template",
+                    "create",
+                    "--from",
+                    str(pptx_path),
+                    "--name",
+                    "demo_error2",
+                    env=env,
+                ).returncode,
                 0,
             )
             self.assertEqual(
@@ -966,7 +1011,8 @@ class TemplateWorkflowTest(unittest.TestCase):
             self.assertEqual(
                 run_cli(
                     "edit",
-                    "--create",
+                    "create",
+                    "--output",
                     str(output_path),
                     "--template",
                     "demo_error2",

@@ -13,6 +13,7 @@ from .session import (
     SessionError,
     cleanup_stale_session_state,
     cleanup_session_artifacts,
+    ensure_session_for_origin,
     load_session_state_if_exists,
     remove_session_state,
     resolve_state_file_path,
@@ -52,7 +53,6 @@ FUTURE_COMMANDS = {
 }
 
 FUTURE_TEMPLATE_COMMANDS = {
-    "show": "Planned for task 004: show template schema or form metadata.",
     "modify": "Planned for task 006: replace or insert slides from template data.",
 }
 
@@ -74,8 +74,8 @@ def build_parser() -> argparse.ArgumentParser:
             help="Inspect slide candidates and emit JSON",
         )
     )
-    _add_init_parser(subparsers.add_parser("init", help="Start a single-session server"))
-    subparsers.add_parser("finish", help="Stop the active session server")
+    _add_init_parser(subparsers.add_parser("init", help="Internal debug command"))
+    subparsers.add_parser("finish", help="Internal debug command")
     subparsers.add_parser("preview", help="Placeholder for slide preview export")
     _add_show_parser(subparsers.add_parser("show", help="Render a slide preview"))
 
@@ -83,8 +83,8 @@ def build_parser() -> argparse.ArgumentParser:
     template_subparsers = template_parser.add_subparsers(dest="template_command")
     _add_show_parser(
         template_subparsers.add_parser(
-            "detect",
-            help="Detect text/image candidates and optionally render annotated preview",
+            "show",
+            help="Show text/image candidates and optionally render annotated preview",
         )
     )
     _add_template_create_parser(
@@ -118,8 +118,13 @@ def build_parser() -> argparse.ArgumentParser:
         )
 
     edit_parser = subparsers.add_parser("edit", help="Edit a PPTX draft from template slides")
-    _add_edit_create_parser(edit_parser)
     edit_subparsers = edit_parser.add_subparsers(dest="edit_command")
+    _add_edit_create_parser(
+        edit_subparsers.add_parser(
+            "create",
+            help="Create a new edit draft from a template package",
+        )
+    )
     _add_edit_fill_template_parser(
         edit_subparsers.add_parser(
             "fill_template",
@@ -167,6 +172,11 @@ def _add_show_parser(parser: argparse.ArgumentParser) -> None:
 
 def _add_template_create_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--name", required=True, help="Template name; .json/.pptx suffix is optional")
+    parser.add_argument(
+        "--from",
+        dest="from_file",
+        help="Source PPTX path; omit to reuse the current active session",
+    )
 
 
 def _add_template_add_slide_parser(parser: argparse.ArgumentParser) -> None:
@@ -207,11 +217,13 @@ def _add_edit_fill_template_parser(parser: argparse.ArgumentParser) -> None:
 
 def _add_edit_create_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--create",
+        "--output",
+        required=True,
         help="Create a new edit draft that will later be saved to this PPTX path",
     )
     parser.add_argument(
         "--template",
+        required=True,
         help="Template name, package directory, manifest.json, or template.pptx to use when creating the edit draft",
     )
 
@@ -301,13 +313,21 @@ def cmd_success(payload: dict[str, Any]) -> int:
 
 
 def run_show_command(args: argparse.Namespace, command_name: str) -> int:
-    if not args.input:
+    session_route = "/show" if command_name == "show" else "/template/show"
+    should_auto_start_session = command_name == "template show" and bool(args.input)
+
+    if not args.input or should_auto_start_session:
         state_file = resolve_state_file_path()
         try:
+            if should_auto_start_session:
+                ensure_session_for_origin(
+                    origin_file=Path(args.input).resolve(),
+                    state_file=state_file,
+                )
             payload = session_request(
                 state_file=state_file,
                 method="POST",
-                route="/show" if command_name == "show" else "/template/detect",
+                route=session_route,
                 payload={
                     "command_name": command_name,
                     "slide_index": args.slide,
@@ -464,12 +484,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in FUTURE_COMMANDS:
         return cmd_future(args.command, FUTURE_COMMANDS[args.command])
     if args.command == "template":
-        if args.template_command == "detect":
-            return run_show_command(args, "template detect")
+        if args.template_command == "show":
+            return run_show_command(args, "template show")
         if args.template_command == "create":
             try:
                 payload = create_template_draft(
                     name=args.name,
+                    from_file=Path(args.from_file) if args.from_file else None,
                 )
             except Exception as exc:
                 return cmd_error("template create", str(exc))
@@ -503,10 +524,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         parser.error("template requires a subcommand")
     if args.command == "edit":
-        if args.create:
+        if args.edit_command == "create":
             try:
                 payload = create_edit_presentation(
-                    output_path=Path(args.create),
+                    output_path=Path(args.output),
                     template_ref=args.template,
                 )
             except Exception as exc:
@@ -535,7 +556,7 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:
                 return cmd_error("edit save", str(exc))
             return cmd_success(payload)
-        parser.error("edit requires --create or a subcommand")
+        parser.error("edit requires a subcommand")
     if args.command == "demo":
         if args.demo_command == "form":
             return cmd_demo_form()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -13,6 +14,8 @@ from .inspect import build_candidates_payload, build_inspect_payload, load_prese
 from .session import load_session_state_if_exists, remove_session_state, save_session_state
 from .show import build_show_payload
 
+IDLE_TIMEOUT_SECONDS = 180
+
 
 class SessionRuntime:
     def __init__(self, origin_file: Path) -> None:
@@ -21,6 +24,13 @@ class SessionRuntime:
         self.inspect_cache: dict[int, dict[str, Any]] = {}
         self.candidate_cache: dict[int, dict[str, Any]] = {}
         self.context: dict[str, Any] = {}
+        self.last_activity_at = time.monotonic()
+
+    def touch(self) -> None:
+        self.last_activity_at = time.monotonic()
+
+    def is_idle_timed_out(self) -> bool:
+        return (time.monotonic() - self.last_activity_at) >= IDLE_TIMEOUT_SECONDS
 
     def inspect(
         self,
@@ -106,6 +116,7 @@ class SessionRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         try:
+            self.server.runtime.touch()
             if self.path == "/health":
                 state = load_session_state_if_exists(self.server.state_file) or {}
                 self._send_json(
@@ -130,6 +141,7 @@ class SessionRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         try:
+            self.server.runtime.touch()
             payload = self._read_json()
             if self.path == "/inspect":
                 response = self.server.runtime.inspect(
@@ -140,7 +152,7 @@ class SessionRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(response)
                 return
 
-            if self.path in {"/show", "/template/detect"}:
+            if self.path in {"/show", "/template/show"}:
                 response = self.server.runtime.show(
                     slide_index=int(payload.get("slide_index", 0)),
                     annotate=bool(payload.get("annotate", False)),
@@ -222,7 +234,8 @@ def main(argv: list[str] | None = None) -> int:
     save_session_state(state_file, state_payload)
 
     try:
-        server.serve_forever(poll_interval=0.2)
+        while not server.runtime.is_idle_timed_out():
+            server.handle_request()
     finally:
         server.server_close()
         remove_session_state(state_file)
