@@ -38,11 +38,21 @@ class CliSmokeTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("--slide", result.stdout)
 
+    def test_edit_help_runs(self) -> None:
+        result = run_cli("edit", "--help")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--create", result.stdout)
+
+    def test_edit_show_template_help_runs(self) -> None:
+        result = run_cli("edit", "show_template", "--help")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--slide", result.stdout)
+
     def test_demo_form_outputs_json(self) -> None:
         result = run_cli("demo", "form")
         self.assertEqual(result.returncode, 0)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["template_path"], "template.pptx")
+        self.assertEqual(payload["template_dir"], "./templates/demo_template")
 
     def test_session_init_inspect_finish_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir_str:

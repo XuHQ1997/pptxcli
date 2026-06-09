@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前已完成任务 001、003、004 和 005 的首版能力：
+当前已完成任务 001、003、004、005 和 006 的首版能力：
 
 - 建立了可运行的 CLI 骨架
 - 明确了首版技术选型与目录结构
@@ -17,6 +17,7 @@
 - 支持通过后台 server 复用当前 PPT 的加载与解析现场
 - 支持创建模板草稿 JSON，并逐页确认模板字段
 - 支持生成 `template.pptx + manifest.json` 模板包
+- 支持通过命令行 `--slide + --field` 填充模板并生成新的 PPTX
 
 ## 技术选型
 
@@ -96,6 +97,10 @@ uv run pptxcli demo form
 - `pptxcli template create --name demo_template`：基于当前会话创建模板草稿 JSON
 - `pptxcli template add_slide --slide 0 -f "1:title" -f "2:author"`：将当前页字段选择写入当前模板草稿
 - `pptxcli template save`：裁剪当前模板对应的原始 PPTX 并生成模板包
+- `pptxcli edit --create ./new.pptx --template demo_template`：创建一个基于模板的编辑草稿
+- `pptxcli edit show_template --slide 0`：查看当前编辑模板某一页有哪些 field 需要填充
+- `pptxcli edit fill_template --slide 0 -f "1:main title" -f "2:./cover.png"`：向当前编辑草稿追加一页已填充的模板页
+- `pptxcli edit save`：保存当前编辑草稿并生成最终 PPTX
 - `pptxcli finish`：关闭当前会话并清理状态文件
 
 ## 会话模式示例
@@ -109,6 +114,15 @@ pptxcli template add_slide --slide 0 \
   -f "1:main title" \
   -f "2:cover image"
 pptxcli template save
+pptxcli edit --create ./filled.pptx --template quarterly_report
+pptxcli edit show_template --slide 0
+pptxcli edit fill_template --slide 0 \
+  -f "1:Quarterly Review" \
+  -f "2:./cover.png"
+pptxcli edit fill_template --slide 0 \
+  -f "1:Appendix Title" \
+  -f "2:./appendix-cover.png"
+pptxcli edit save
 pptxcli finish
 ```
 
@@ -122,6 +136,10 @@ pptxcli finish
 - 将 agent 通过命令行选中的字段写入模板草稿 JSON
 - 模板页名默认使用 `slide_<index>`
 - 裁剪原始 PPTX，仅保留选中的模板页，并生成 `manifest.json`
+- 使用 `edit --create` 创建编辑中的目标 PPT 草稿，并把 session mode 切换到 `edit_ppt`
+- 使用 `edit show_template --slide ...` 查看指定模板页的字段编号、类型和说明
+- 使用 `edit fill_template --slide ... --field index:value` 逐页追加已填充的模板页，并校验 text/image 字段
+- 使用 `edit save` 落盘最终 PPTX，并把 session mode 切回模板提取态
 - 在结束时关闭 server 并清理状态文件
 
 ## 后续任务映射
@@ -129,6 +147,6 @@ pptxcli finish
 - 任务 002：补充 PPTX 解包与中间模型
 - 任务 003：实现候选检测和视觉标注
 - 任务 004：会话化服务与状态管理
-- 任务 005：模板填充并输出新 PPT
-- 任务 006：局部修改与预览
+- 任务 005：模板确认与 manifest 生成
+- 任务 006：模板填充并输出新 PPT
 - 任务 007：稳定 Agent 交互协议

@@ -10,7 +10,7 @@ from threading import Thread
 from typing import Any
 
 from .inspect import build_candidates_payload, build_inspect_payload, load_presentation
-from .session import remove_session_state, save_session_state
+from .session import load_session_state_if_exists, remove_session_state, save_session_state
 from .show import build_show_payload
 
 
@@ -107,6 +107,7 @@ class SessionRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         try:
             if self.path == "/health":
+                state = load_session_state_if_exists(self.server.state_file) or {}
                 self._send_json(
                     {
                         "status": "ok",
@@ -114,6 +115,9 @@ class SessionRequestHandler(BaseHTTPRequestHandler):
                         "origin_file": str(self.server.runtime.origin_file),
                         "slide_count": len(self.server.runtime.presentation.slides),
                         "cached_inspections": len(self.server.runtime.inspect_cache),
+                        "mode": state.get("mode", "idle"),
+                        "active_template": state.get("active_template"),
+                        "edit_context": state.get("edit_context"),
                     }
                 )
                 return
@@ -213,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         "server_url": f"http://127.0.0.1:{server.server_address[1]}",
         "origin_file": str(origin_file),
         "created_at": datetime.now(UTC).isoformat(),
+        "mode": "idle",
     }
     save_session_state(state_file, state_payload)
 

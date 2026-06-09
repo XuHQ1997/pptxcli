@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from urllib import error, request
@@ -31,11 +32,21 @@ def resolve_state_file_path(cli_argv0: str | None = None) -> Path:
 
 
 def load_session_state(state_file: Path) -> dict[str, Any]:
-    if not state_file.exists():
+    payload = load_session_state_if_exists(state_file)
+    if payload is None:
         raise SessionError(
             f"no active session state file found: {state_file}. Run `pptxcli init --origin_file <file>` first."
         )
-    return json.loads(state_file.read_text(encoding="utf-8"))
+    return payload
+
+
+def load_session_state_if_exists(state_file: Path) -> dict[str, Any] | None:
+    if not state_file.exists():
+        return None
+    payload = json.loads(state_file.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise SessionError(f"expected JSON object in session state file: {state_file}")
+    return payload
 
 
 def save_session_state(state_file: Path, payload: dict[str, Any]) -> None:
@@ -43,6 +54,31 @@ def save_session_state(state_file: Path, payload: dict[str, Any]) -> None:
     temp_file = state_file.with_suffix(f"{state_file.suffix}.tmp")
     temp_file.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     temp_file.replace(state_file)
+
+
+def merge_session_state(state_file: Path, updates: dict[str, Any]) -> dict[str, Any]:
+    current = load_session_state_if_exists(state_file) or {}
+    merged = deepcopy(current)
+    merged.update(updates)
+    save_session_state(state_file, merged)
+    return merged
+
+
+def update_session_mode(
+    state_file: Path,
+    *,
+    mode: str,
+    active_template: str | None = None,
+    edit_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    updates: dict[str, Any] = {"mode": mode}
+    if active_template is not None:
+        updates["active_template"] = active_template
+    if edit_context is not None:
+        updates["edit_context"] = edit_context
+    elif "edit_context" in (load_session_state_if_exists(state_file) or {}):
+        updates["edit_context"] = None
+    return merge_session_state(state_file, updates)
 
 
 def remove_session_state(state_file: Path) -> None:
@@ -71,7 +107,10 @@ def session_request(
     state = load_session_state(state_file)
     server_url = state.get("server_url")
     if not isinstance(server_url, str) or not server_url:
-        raise SessionError(f"invalid session state file: {state_file}")
+        mode = str(state.get("mode", "idle")).strip() or "idle"
+        raise SessionError(
+            f"current session mode is `{mode}` and has no live session server. Run `pptxcli init --origin_file <file>` first."
+        )
 
     url = server_url.rstrip("/") + route
     body = None
@@ -100,9 +139,17 @@ def session_request(
 def cleanup_stale_session_state(state_file: Path) -> bool:
     if not state_file.exists():
         return False
+    state = load_session_state_if_exists(state_file)
+    if not state:
+        remove_session_state(state_file)
+        return True
+    server_url = state.get("server_url")
+    if not isinstance(server_url, str) or not server_url:
+        return False
     try:
         session_request(state_file=state_file, method="GET", route="/health", timeout=1.0)
     except SessionError:
+        cleanup_session_artifacts(state_file)
         remove_session_state(state_file)
         return True
     return False
@@ -111,6 +158,16 @@ def cleanup_stale_session_state(state_file: Path) -> bool:
 def assert_no_active_session(state_file: Path) -> None:
     if not state_file.exists():
         return
+    state = load_session_state_if_exists(state_file)
+    if not state:
+        remove_session_state(state_file)
+        return
+    server_url = state.get("server_url")
+    if not isinstance(server_url, str) or not server_url:
+        mode = str(state.get("mode", "idle")).strip() or "idle"
+        raise SessionError(
+            f"an active local session already exists in mode `{mode}`. Run `pptxcli finish` before starting another session."
+        )
     try:
         health = session_request(
             state_file=state_file,
@@ -126,6 +183,22 @@ def assert_no_active_session(state_file: Path) -> None:
     raise SessionError(
         f"an active session already exists for {origin_file}. Run `pptxcli finish` before starting another session."
     )
+
+
+def cleanup_session_artifacts(state_file: Path) -> None:
+    state = load_session_state_if_exists(state_file)
+    if not state:
+        return
+    edit_context = state.get("edit_context")
+    if not isinstance(edit_context, dict):
+        return
+    working_path = edit_context.get("working_pptx_path")
+    if not isinstance(working_path, str) or not working_path.strip():
+        return
+    try:
+        Path(working_path).resolve().unlink()
+    except FileNotFoundError:
+        return
 
 
 def start_session_server(

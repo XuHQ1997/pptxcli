@@ -12,6 +12,8 @@ from .inspect import cmd_inspect
 from .session import (
     SessionError,
     cleanup_stale_session_state,
+    cleanup_session_artifacts,
+    load_session_state_if_exists,
     remove_session_state,
     resolve_state_file_path,
     session_request,
@@ -22,11 +24,28 @@ from .template_ops import (
     add_slide_to_template_draft,
     build_template_package,
     create_template_draft,
+    create_edit_presentation,
+    fill_template_into_edit_presentation,
     save_template_package,
+    save_edit_presentation,
+    show_template_fields_for_edit,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
 DEMO_FORM_PATH = ROOT / "examples" / "demo-form.json"
+DEMO_FORM_FALLBACK: dict[str, Any] = {
+    "template_dir": "./templates/demo_template",
+    "slides": [
+        {
+            "slide": "slide_0",
+            "fields": {
+                "main_title": "main title of the presentation",
+                "sub_title": "sub title of the presentation",
+                "author": "author of the presentation",
+            },
+        }
+    ],
+}
 
 FUTURE_COMMANDS = {
     "preview": "Planned for task 006: export slide previews for validation.",
@@ -34,7 +53,6 @@ FUTURE_COMMANDS = {
 
 FUTURE_TEMPLATE_COMMANDS = {
     "show": "Planned for task 004: show template schema or form metadata.",
-    "fill": "Planned for task 005: fill a template with JSON form data.",
     "modify": "Planned for task 006: replace or insert slides from template data.",
 }
 
@@ -99,6 +117,26 @@ def build_parser() -> argparse.ArgumentParser:
             help=f"Placeholder for template {command_name}",
         )
 
+    edit_parser = subparsers.add_parser("edit", help="Edit a PPTX draft from template slides")
+    _add_edit_create_parser(edit_parser)
+    edit_subparsers = edit_parser.add_subparsers(dest="edit_command")
+    _add_edit_fill_template_parser(
+        edit_subparsers.add_parser(
+            "fill_template",
+            help="Append one filled template slide into the current edit draft",
+        )
+    )
+    _add_edit_show_template_parser(
+        edit_subparsers.add_parser(
+            "show_template",
+            help="Show which fields are available on a template slide for edit fill_template",
+        )
+    )
+    edit_subparsers.add_parser(
+        "save",
+        help="Persist the current edit draft to its final PPTX output path",
+    )
+
     demo_parser = subparsers.add_parser("demo", help="Demo helpers")
     demo_subparsers = demo_parser.add_subparsers(dest="demo_command")
     demo_subparsers.add_parser("form", help="Print a minimal fill-form JSON example")
@@ -151,6 +189,42 @@ def _add_template_save_parser(parser: argparse.ArgumentParser) -> None:
     del parser
 
 
+def _add_edit_fill_template_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--slide",
+        type=int,
+        required=True,
+        help="Zero-based template slide index inside the template package",
+    )
+    parser.add_argument(
+        "--field",
+        "-f",
+        action="append",
+        required=True,
+        help='Field selector in the form "index:value"; repeat for multiple fields',
+    )
+
+
+def _add_edit_create_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--create",
+        help="Create a new edit draft that will later be saved to this PPTX path",
+    )
+    parser.add_argument(
+        "--template",
+        help="Template name, package directory, manifest.json, or template.pptx to use when creating the edit draft",
+    )
+
+
+def _add_edit_show_template_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--slide",
+        type=int,
+        required=True,
+        help="Zero-based template slide index inside the template package",
+    )
+
+
 def _add_inspect_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--input",
@@ -192,8 +266,11 @@ def cmd_tech() -> int:
 
 
 def cmd_demo_form() -> int:
-    with DEMO_FORM_PATH.open("r", encoding="utf-8") as fh:
-        payload: Any = json.load(fh)
+    if DEMO_FORM_PATH.exists():
+        with DEMO_FORM_PATH.open("r", encoding="utf-8") as fh:
+            payload: Any = json.load(fh)
+    else:
+        payload = DEMO_FORM_FALLBACK
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0
 
@@ -325,6 +402,20 @@ def cmd_finish() -> int:
     if not state_file.exists():
         return cmd_error("finish", "no active session found.")
 
+    stored_state = load_session_state_if_exists(state_file) or {}
+    server_url = stored_state.get("server_url")
+    if not isinstance(server_url, str) or not server_url:
+        cleanup_session_artifacts(state_file)
+        remove_session_state(state_file)
+        payload = {
+            "command": "finish",
+            "status": "stopped",
+            "state_file": str(state_file),
+            "mode": stored_state.get("mode"),
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+
     try:
         state = session_request(state_file=state_file, method="GET", route="/health", timeout=1.0)
         session_request(state_file=state_file, method="POST", route="/shutdown", payload={})
@@ -332,6 +423,7 @@ def cmd_finish() -> int:
         while state_file.exists() and time.time() < deadline:
             time.sleep(0.1)
     except SessionError:
+        cleanup_session_artifacts(state_file)
         remove_session_state(state_file)
         payload = {
             "command": "finish",
@@ -341,6 +433,7 @@ def cmd_finish() -> int:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return 0
 
+    cleanup_session_artifacts(state_file)
     remove_session_state(state_file)
     payload = {
         "command": "finish",
@@ -409,6 +502,40 @@ def main(argv: list[str] | None = None) -> int:
                 FUTURE_TEMPLATE_COMMANDS[args.template_command],
             )
         parser.error("template requires a subcommand")
+    if args.command == "edit":
+        if args.create:
+            try:
+                payload = create_edit_presentation(
+                    output_path=Path(args.create),
+                    template_ref=args.template,
+                )
+            except Exception as exc:
+                return cmd_error("edit create", str(exc))
+            return cmd_success(payload)
+        if args.edit_command == "fill_template":
+            try:
+                payload = fill_template_into_edit_presentation(
+                    slide_index=args.slide,
+                    field_specs=args.field,
+                )
+            except Exception as exc:
+                return cmd_error("edit fill_template", str(exc))
+            return cmd_success(payload)
+        if args.edit_command == "show_template":
+            try:
+                payload = show_template_fields_for_edit(
+                    slide_index=args.slide,
+                )
+            except Exception as exc:
+                return cmd_error("edit show_template", str(exc))
+            return cmd_success(payload)
+        if args.edit_command == "save":
+            try:
+                payload = save_edit_presentation()
+            except Exception as exc:
+                return cmd_error("edit save", str(exc))
+            return cmd_success(payload)
+        parser.error("edit requires --create or a subcommand")
     if args.command == "demo":
         if args.demo_command == "form":
             return cmd_demo_form()
