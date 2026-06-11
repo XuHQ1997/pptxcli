@@ -20,12 +20,14 @@ from .container_layout import (
     render_resolved_content,
     solve_content_layout,
 )
+from .models import BBox
 from .session import (
     SessionError,
     cleanup_stale_session_state,
     ensure_session_for_origin,
     load_session_state_if_exists,
     load_session_state,
+    resolve_repo_root,
     resolve_state_file_path,
     session_request,
     update_session_mode,
@@ -41,7 +43,7 @@ def resolve_template_root(cli_argv0: str | None = None) -> Path:
     env_path = os.environ.get(TEMPLATE_ROOT_ENV)
     if env_path:
         return Path(env_path).expanduser().resolve()
-    return resolve_state_file_path(cli_argv0).parent / "templates"
+    return resolve_repo_root(cli_argv0) / "templates"
 
 
 def create_template_draft(
@@ -80,16 +82,18 @@ def create_template_draft(
 def add_slide_to_template_draft(
     *,
     slide_index: int,
-    field_specs: list[str],
+    field_specs: list[str] | None,
+    content_spec: str | None,
     replace: bool,
 ) -> dict[str, Any]:
     template_name = _resolve_template_name()
     draft_path = resolve_template_root() / f"{template_name}.json"
     draft = _load_template_draft(draft_path)
-    inspect_payload = _load_slide_candidates(slide_index=slide_index)
+    inspect_payload = _load_slide_objects(slide_index=slide_index)
     slide_record = _build_slide_record(
         slide_index=slide_index,
         field_specs=field_specs,
+        content_spec=content_spec,
         inspect_payload=inspect_payload,
     )
 
@@ -121,6 +125,7 @@ def add_slide_to_template_draft(
         "slide_name": slide_record["slide_name"],
         "source_slide_index": slide_index,
         "field_count": len(slide_record["fields"]),
+        "content_shape_count": len(slide_record.get("content_shapes") or []),
     }
 
 
@@ -145,7 +150,7 @@ def save_template_package(
     source_slide_indexes = [int(slide["source_slide_index"]) for slide in slides]
     _save_cropped_presentation(
         origin_file=origin_file,
-        slide_indexes=source_slide_indexes,
+        slides=slides,
         output_path=template_pptx_path,
     )
 
@@ -160,6 +165,7 @@ def save_template_package(
         active_template=template_name,
         edit_context=None,
     )
+    _cleanup_preview_dir()
 
     return {
         "command": "template save",
@@ -195,7 +201,7 @@ def create_edit_presentation(
         template_ref=template_ref,
     )
     manifest = _load_manifest(manifest_path)
-    working_path = resolve_state_file_path().parent / EDIT_WORKING_FILE_NAME
+    working_path = resolve_repo_root() / EDIT_WORKING_FILE_NAME
 
     output_presentation = Presentation(str(template_pptx_path))
     _remove_all_slides(output_presentation)
@@ -258,6 +264,7 @@ def show_template_fields_for_edit(
             "source_slide_index": manifest_slide.get("source_slide_index"),
             "slide_size": manifest_slide.get("slide_size"),
             "field_count": len(manifest_slide["fields"]),
+            "content_area": manifest_slide.get("content_area"),
             "fields": [_serialize_template_field(field) for field in manifest_slide["fields"]],
         },
     }
@@ -299,15 +306,22 @@ def fill_template_into_edit_presentation(
     rendered_content: list[dict[str, Any]] = []
     resolved_content_payload: dict[str, Any] | None = None
     if content_spec is not None:
+        manifest_content_area = requested_slide.get("content_area")
+        if manifest_content_area is None:
+            raise ValueError(
+                f"template slide `{requested_slide['slide_name']}` does not define a content area; remove --content or mark content objects during template add_slide"
+            )
         content_tree = parse_content_spec(
             content_spec,
             slide_width=int(output_presentation.slide_width),
             slide_height=int(output_presentation.slide_height),
+            default_bbox=_bbox_from_payload(manifest_content_area),
         )
         resolved_content = solve_content_layout(
             content_tree,
             slide_width=int(output_presentation.slide_width),
             slide_height=int(output_presentation.slide_height),
+            default_bbox=_bbox_from_payload(manifest_content_area),
         )
         rendered_content = render_resolved_content(
             slide=output_slide,
@@ -421,13 +435,13 @@ def _resolve_origin_file(*, from_file: Path | None = None) -> Path:
     return origin_file
 
 
-def _load_slide_candidates(*, slide_index: int) -> dict[str, Any]:
+def _load_slide_objects(*, slide_index: int) -> dict[str, Any]:
     state_file = resolve_state_file_path()
     try:
         return session_request(
             state_file=state_file,
             method="POST",
-            route="/template/candidates",
+            route="/inspect",
             payload={
                 "command_name": "template add_slide",
                 "slide_index": slide_index,
@@ -441,58 +455,95 @@ def _load_slide_candidates(*, slide_index: int) -> dict[str, Any]:
 def _build_slide_record(
     *,
     slide_index: int,
-    field_specs: list[str],
+    field_specs: list[str] | None,
+    content_spec: str | None,
     inspect_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    candidates = inspect_payload.get("candidates")
-    if not isinstance(candidates, list):
-        raise ValueError("invalid inspect payload: missing candidates")
-    candidates_by_index = {
-        int(candidate.get("index")): candidate
-        for candidate in candidates
-        if isinstance(candidate, dict) and candidate.get("index") is not None
+    objects = inspect_payload.get("objects")
+    if not isinstance(objects, list):
+        raise ValueError("invalid inspect payload: missing objects")
+    objects_by_index = {
+        int(item.get("index")): item
+        for item in objects
+        if isinstance(item, dict) and item.get("index") is not None
     }
 
-    if not field_specs:
-        raise ValueError("at least one --field is required")
+    if not field_specs and not content_spec:
+        raise ValueError("at least one of --field or --content is required")
 
     seen_indexes: set[int] = set()
     seen_field_keys: set[str] = set()
     fields: list[dict[str, Any]] = []
-    for raw_field_spec in field_specs:
+    for raw_field_spec in field_specs or []:
         selected_index, description = _parse_field_spec(raw_field_spec)
         if selected_index in seen_indexes:
             raise ValueError(f"duplicate field index on slide {slide_index}: {selected_index}")
         seen_indexes.add(selected_index)
 
-        candidate = candidates_by_index.get(selected_index)
-        if candidate is None:
+        selected_object = objects_by_index.get(selected_index)
+        if selected_object is None:
             raise ValueError(
                 f"field index {selected_index} does not exist on slide {slide_index}"
             )
 
-        field_type = str(candidate.get("kind", "")).strip()
+        field_type = str(selected_object.get("object_type", "")).strip()
+        if field_type not in {"text", "image"}:
+            raise ValueError(
+                f"field index {selected_index} on slide {slide_index} must reference a text/image object"
+            )
         field_key = _build_field_key(description=description, used_keys=seen_field_keys)
         field_record: dict[str, Any] = {
-            "index": selected_index,
+            "annotate_index": selected_index,
             "field_key": field_key,
             "description": description,
             "type": field_type,
-            "shape_id": int(candidate["shape_id"]),
-            "role_hint": candidate.get("role_hint"),
-            "bbox": candidate.get("bbox"),
+            "shape_id": int(selected_object["shape_id"]),
+            "role_hint": selected_object.get("role_hint"),
+            "bbox": selected_object.get("bbox"),
         }
-        if candidate.get("text_excerpt") is not None:
-            field_record["text_excerpt"] = candidate["text_excerpt"]
-        if candidate.get("image_name") is not None:
-            field_record["image_name"] = candidate["image_name"]
+        if selected_object.get("text") is not None:
+            field_record["text_excerpt"] = str(selected_object["text"])[:80]
+        if selected_object.get("image_name") is not None:
+            field_record["image_name"] = selected_object["image_name"]
         fields.append(field_record)
+
+    content_indexes = _parse_index_csv(content_spec)
+    content_shapes: list[dict[str, Any]] = []
+    content_bboxes: list[BBox] = []
+    for content_index in content_indexes:
+        if content_index in seen_indexes:
+            raise ValueError(
+                f"content index {content_index} conflicts with a selected field on slide {slide_index}"
+            )
+        selected_object = objects_by_index.get(content_index)
+        if selected_object is None:
+            raise ValueError(
+                f"content index {content_index} does not exist on slide {slide_index}"
+            )
+        bbox = _bbox_from_payload(selected_object.get("bbox"))
+        if bbox is None:
+            raise ValueError(
+                f"content index {content_index} on slide {slide_index} is missing bbox information"
+            )
+        content_shapes.append(
+            {
+                "annotate_index": content_index,
+                "shape_id": int(selected_object["shape_id"]),
+                "object_type": str(selected_object.get("object_type") or ""),
+                "bbox": bbox.to_dict(),
+            }
+        )
+        content_bboxes.append(bbox)
+
+    content_area = _union_bboxes(content_bboxes)
 
     return {
         "slide_name": f"slide_{slide_index}",
         "source_slide_index": slide_index,
         "slide_size": inspect_payload.get("slide_size"),
         "fields": fields,
+        "content_shapes": content_shapes,
+        "content_area": content_area.to_dict() if content_area is not None else None,
         "added_at": _now_iso(),
     }
 
@@ -520,9 +571,10 @@ def _build_manifest(
 
     for template_slide_index, slide in enumerate(draft["slides"]):
         fields_payload: list[dict[str, Any]] = []
-        for field in slide["fields"]:
+        for field_index, field in enumerate(slide["fields"], start=1):
             field_payload = {
-                "index": field["index"],
+                "index": field_index,
+                "source_annotate_index": field["annotate_index"],
                 "field_key": field["field_key"],
                 "description": field["description"],
                 "type": field["type"],
@@ -553,6 +605,8 @@ def _build_manifest(
                 "source_slide_index": slide["source_slide_index"],
                 "slide_size": slide.get("slide_size"),
                 "field_count": len(fields_payload),
+                "content_shape_count": len(slide.get("content_shapes") or []),
+                "content_area": slide.get("content_area"),
                 "fields": fields_payload,
             }
         )
@@ -574,9 +628,10 @@ def _build_manifest(
 def _save_cropped_presentation(
     *,
     origin_file: Path,
-    slide_indexes: list[int],
+    slides: list[dict[str, Any]],
     output_path: Path,
 ) -> None:
+    slide_indexes = [int(slide["source_slide_index"]) for slide in slides]
     if len(set(slide_indexes)) != len(slide_indexes):
         raise ValueError("template draft contains duplicate source_slide_index values")
 
@@ -603,6 +658,13 @@ def _save_cropped_presentation(
         slide_id_list.remove(slide_id)
     for slide_index in slide_indexes:
         slide_id_list.append(selected_by_index[slide_index])
+
+    for template_slide_index, slide_record in enumerate(slides):
+        content_shapes = slide_record.get("content_shapes") or []
+        if not content_shapes:
+            continue
+        shape_ids = [int(item["shape_id"]) for item in content_shapes]
+        _remove_shapes_by_id(slide=presentation.slides[template_slide_index], shape_ids=shape_ids)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     presentation.save(str(output_path))
@@ -701,6 +763,7 @@ def _build_fill_request(
         "slide_name": str(manifest_slide["slide_name"]),
         "template_slide_index": int(manifest_slide["template_slide_index"]),
         "assignments": assignments,
+        "content_area": manifest_slide.get("content_area"),
     }
 
 
@@ -788,6 +851,9 @@ def _validate_fill_fields(
 def _serialize_template_field(field: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "index": int(field["index"]),
+        "source_annotate_index": int(field["source_annotate_index"])
+        if field.get("source_annotate_index") is not None
+        else None,
         "field_key": str(field.get("field_key") or ""),
         "description": str(field.get("description") or ""),
         "type": str(field.get("type") or ""),
@@ -917,6 +983,63 @@ def _clear_slide_shapes(slide: Any) -> None:
     for shape in list(slide.shapes):
         element = shape.element
         element.getparent().remove(element)
+
+
+def _remove_shapes_by_id(*, slide: Any, shape_ids: list[int]) -> None:
+    if not shape_ids:
+        return
+    wanted = set(shape_ids)
+    for shape in list(slide.shapes):
+        if int(shape.shape_id) not in wanted:
+            continue
+        element = shape.element
+        element.getparent().remove(element)
+
+
+def _parse_index_csv(raw_value: str | None) -> list[int]:
+    if raw_value is None or not raw_value.strip():
+        return []
+    indexes: list[int] = []
+    seen: set[int] = set()
+    for part in raw_value.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        try:
+            value = int(token)
+        except ValueError as exc:
+            raise ValueError(f"invalid index in comma-separated list: {token}") from exc
+        if value <= 0:
+            raise ValueError(f"index must be positive: {value}")
+        if value in seen:
+            raise ValueError(f"duplicate index in comma-separated list: {value}")
+        seen.add(value)
+        indexes.append(value)
+    return indexes
+
+
+def _bbox_from_payload(payload: Any) -> BBox | None:
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return BBox(
+            x=int(payload["x"]),
+            y=int(payload["y"]),
+            w=int(payload["w"]),
+            h=int(payload["h"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _union_bboxes(boxes: list[BBox]) -> BBox | None:
+    if not boxes:
+        return None
+    left = min(box.x for box in boxes)
+    top = min(box.y for box in boxes)
+    right = max(box.x + box.w for box in boxes)
+    bottom = max(box.y + box.h for box in boxes)
+    return BBox(x=left, y=top, w=right - left, h=bottom - top)
 
 
 def _apply_slide_fields(
@@ -1197,6 +1320,12 @@ def _derive_template_name(manifest_path: Path) -> str:
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _cleanup_preview_dir() -> None:
+    preview_dir = resolve_repo_root() / "preview"
+    if preview_dir.exists():
+        shutil.rmtree(preview_dir)
 
 
 def _now_iso() -> str:

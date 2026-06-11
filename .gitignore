@@ -1,3 +1,11 @@
+# environment
 .venv/
+
+# python
 __pycache__/
 .pytest_cache/
+
+# temporary files
+.pptxcli-session.json
+.pptxcli-session.log
+templates/

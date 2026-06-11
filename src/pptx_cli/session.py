@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -25,10 +26,12 @@ def resolve_state_file_path(cli_argv0: str | None = None) -> Path:
     if env_path:
         return Path(env_path).expanduser().resolve()
 
-    argv0 = cli_argv0 or sys.argv[0]
-    if argv0:
-        return Path(argv0).resolve().parent / STATE_FILE_NAME
-    return Path.cwd() / STATE_FILE_NAME
+    return resolve_repo_root(cli_argv0) / STATE_FILE_NAME
+
+
+def resolve_repo_root(cli_argv0: str | None = None) -> Path:
+    del cli_argv0
+    return Path(__file__).resolve().parents[2]
 
 
 def load_session_state(state_file: Path) -> dict[str, Any]:
@@ -123,6 +126,10 @@ def session_request(
     try:
         with request.urlopen(req, timeout=timeout) as response:
             content = response.read().decode("utf-8")
+    except (TimeoutError, socket.timeout) as exc:
+        raise SessionError(
+            f"session server request timed out after {timeout:.1f}s at {server_url}"
+        ) from exc
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise SessionError(f"session server returned HTTP {exc.code}: {detail}") from exc

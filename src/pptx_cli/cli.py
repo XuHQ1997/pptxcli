@@ -185,8 +185,11 @@ def _add_template_add_slide_parser(parser: argparse.ArgumentParser) -> None:
         "--field",
         "-f",
         action="append",
-        required=True,
         help='Field selector in the form "index:description"; repeat for multiple fields',
+    )
+    parser.add_argument(
+        "--content",
+        help='Comma-separated object indexes that belong to page content rather than template, e.g. "3,4,5"',
     )
     parser.add_argument(
         "--replace",
@@ -503,6 +506,7 @@ def main(argv: list[str] | None = None) -> int:
                 payload = add_slide_to_template_draft(
                     slide_index=args.slide,
                     field_specs=args.field,
+                    content_spec=args.content,
                     replace=args.replace,
                 )
             except Exception as exc:

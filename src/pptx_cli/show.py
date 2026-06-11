@@ -5,12 +5,13 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pypdfium2 as pdfium
 from PIL import Image, ImageDraw, ImageFont
 
-from .inspect import inspect_slide
-from .models import Candidate
+from .inspect import inspect_slide, inspect_slide_objects
+from .session import resolve_repo_root
 
 ANNOTATION_COLORS = [
     "#FF3B30",
@@ -63,22 +64,35 @@ def build_show_payload(
     candidates_out: Path | None,
     presentation: object | None = None,
 ) -> dict[str, object]:
-    slide_data = inspect_slide(
-        input_path=input_path,
-        slide_index=slide_index,
-        presentation=presentation,
-    )
+    annotate_targets: list[Any]
+    if command_name == "template show":
+        slide_data = inspect_slide_objects(
+            input_path=input_path,
+            slide_index=slide_index,
+            presentation=presentation,
+        )
+        payload = slide_data.to_dict()
+        annotate_targets = list(slide_data.objects)
+    else:
+        slide_data = inspect_slide(
+            input_path=input_path,
+            slide_index=slide_index,
+            presentation=presentation,
+        )
+        payload = slide_data.to_dict()
+        annotate_targets = list(slide_data.candidates)
     image = render_slide_preview(input_path=input_path, slide_index=slide_index)
 
     if annotate:
         image = annotate_candidates(
             image=image,
-            candidates=slide_data.candidates,
+            candidates=annotate_targets,
             slide_width=slide_data.slide_width,
             slide_height=slide_data.slide_height,
         )
 
     resolved_output = _resolve_output_path(
+        command_name=command_name,
         input_path=input_path,
         slide_index=slide_index,
         annotate=annotate,
@@ -90,11 +104,10 @@ def build_show_payload(
     if candidates_out is not None:
         candidates_out.parent.mkdir(parents=True, exist_ok=True)
         candidates_out.write_text(
-            json.dumps(slide_data.to_dict(), indent=2, ensure_ascii=False),
+            json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
 
-    payload = slide_data.to_dict()
     payload.update(
         {
             "command": command_name,
@@ -157,7 +170,7 @@ def render_slide_preview(input_path: Path, slide_index: int) -> Image.Image:
 def annotate_candidates(
     *,
     image: Image.Image,
-    candidates: list[Candidate],
+    candidates: list[Any],
     slide_width: int,
     slide_height: int,
 ) -> Image.Image:
@@ -293,6 +306,7 @@ def _load_annotation_font(
 
 def _resolve_output_path(
     *,
+    command_name: str,
     input_path: Path,
     slide_index: int,
     annotate: bool,
@@ -300,6 +314,8 @@ def _resolve_output_path(
 ) -> Path:
     if output_path is not None:
         return output_path.resolve()
+    if command_name == "template show" and annotate:
+        return resolve_repo_root() / "preview" / f"{input_path.stem}.slide-{slide_index}.annotated.png"
     suffix = "annotated" if annotate else "preview"
     return input_path.resolve().with_name(
         f"{input_path.stem}.slide-{slide_index}.{suffix}.png"

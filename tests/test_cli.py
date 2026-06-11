@@ -4,9 +4,17 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pptx import Presentation
 from pptx.util import Inches
+from pptx_cli.session import (
+    cleanup_stale_session_state,
+    resolve_repo_root,
+    resolve_state_file_path,
+    save_session_state,
+)
+from pptx_cli.template_ops import resolve_template_root
 
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "pptxcli"
@@ -93,6 +101,30 @@ class CliSmokeTest(unittest.TestCase):
             finish_payload = json.loads(finish_result.stdout)
             self.assertEqual(finish_payload["status"], "stopped")
             self.assertFalse(state_file.exists())
+
+    def test_cleanup_stale_session_state_handles_request_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            state_file = tmp_dir / ".pptxcli-session.json"
+            save_session_state(
+                state_file,
+                {
+                    "server_url": "http://127.0.0.1:65535",
+                    "mode": "edit_ppt",
+                },
+            )
+
+            with patch("pptx_cli.session.request.urlopen", side_effect=TimeoutError("timed out")):
+                cleaned = cleanup_stale_session_state(state_file)
+
+            self.assertTrue(cleaned)
+            self.assertFalse(state_file.exists())
+
+    def test_resolve_paths_follow_repo_root(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(resolve_repo_root(), ROOT)
+            self.assertEqual(resolve_state_file_path(), ROOT / ".pptxcli-session.json")
+            self.assertEqual(resolve_template_root(), ROOT / "templates")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from pptx.util import Inches
 from pptx_cli.cli import main
 from pptx_cli.inspect import inspect_slide, inspect_slide_objects
 from pptx_cli.models import BBox, Candidate
-from pptx_cli.show import _fit_label_layout, annotate_candidates
+from pptx_cli.show import _fit_label_layout, annotate_candidates, build_show_payload
 
 
 class ShowCommandTest(unittest.TestCase):
@@ -138,6 +138,35 @@ class ShowCommandTest(unittest.TestCase):
             self.assertEqual(payload["command"], "show")
             self.assertTrue(payload["annotated"])
             self.assertEqual(len(payload["candidates"]), 1)
+
+    def test_template_show_annotate_defaults_to_repo_preview_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            repo_root = tmp_dir / "repo"
+            preview_dir = repo_root / "preview"
+            pptx_path = tmp_dir / "demo.pptx"
+
+            presentation = Presentation()
+            slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+            slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1)).text_frame.text = (
+                "Quarterly Review"
+            )
+            presentation.save(pptx_path)
+
+            with patch("pptx_cli.show.resolve_repo_root", return_value=repo_root):
+                with patch("pptx_cli.show.render_slide_preview", return_value=Image.new("RGB", (800, 600), "white")):
+                    payload = build_show_payload(
+                        command_name="template show",
+                        input_path=pptx_path,
+                        slide_index=0,
+                        annotate=True,
+                        output_path=None,
+                        candidates_out=None,
+                    )
+
+            expected_path = preview_dir / "demo.slide-0.annotated.png"
+            self.assertEqual(Path(str(payload["image_path"])), expected_path)
+            self.assertTrue(expected_path.exists())
 
 
 if __name__ == "__main__":

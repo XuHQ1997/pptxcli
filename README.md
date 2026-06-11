@@ -156,15 +156,16 @@ pptxcli edit save
 - `type: "image"`：位图文件
 - `type: "svg"`：SVG 文件
 
-常用字段包括：
+当前协议刻意保持精简：
 
-- `bbox`：根容器的绝对区域，单位为 EMU；省略时默认铺满整页
-- `padding` / `gap`：容器内边距与子元素间距
-- `width` / `height` / `min_width` / `min_height`：尺寸约束
-- `grow`：在线性布局中参与剩余空间分配
-- `align` / `cross_align`：主轴与交叉轴对齐
-- `columns` / `rows` / `column_weights` / `row_weights`：Grid 行列配置
-- `style`：文本样式，如 `font_size`、`font_name`、`bold`、`color`
+- 最外层节点默认铺满模板页的 `content_area`
+- 子节点使用 `ratio` 按比例分配空间
+- `gap` 也使用比例值，例如 `0.05`
+- 容器节点只使用 `layout`、`children`、`ratio`、`gap`
+- `grid` 额外支持 `columns`、`column_ratios`、`row_ratios`
+- 文本节点使用 `type: "text"` + `text`
+- 图片和 SVG 节点使用 `type` + `path`
+- 对齐默认居中，不再开放 `bbox`、`width`、`height`、`align`、`cross_align` 等绝对控制字段
 
 示例：
 
@@ -173,22 +174,21 @@ pptxcli edit fill_template --slide 0 \
   -f "1:Quarterly Review" \
   --content '{
     "layout": "vertical",
-    "bbox": {"x": 731520, "y": 1463040, "w": 5486400, "h": 2743200},
-    "gap": 109728,
+    "gap": 0.05,
     "children": [
       {
         "type": "text",
-        "height": 548640,
+        "ratio": 1,
         "text": "Agenda",
         "style": {"font_size": 20, "bold": true}
       },
       {
         "layout": "horizontal",
-        "grow": 1,
-        "gap": 109728,
+        "ratio": 2,
+        "gap": 0.05,
         "children": [
-          {"type": "text", "grow": 1, "text": "Summary Block"},
-          {"type": "image", "width": 1371600, "path": "./cover.png", "fit": "contain"}
+          {"type": "text", "ratio": 2, "text": "Summary Block"},
+          {"type": "image", "ratio": 1, "path": "./cover.png", "fit": "contain"}
         ]
       }
     ]
